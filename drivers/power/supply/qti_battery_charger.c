@@ -440,11 +440,11 @@ struct battery_chg_dev {
 	struct completion		fw_update_ack;
 	struct psy_state		psy_list[PSY_TYPE_MAX];
 	struct dentry			*debugfs_dir;
+	/* extcon for VBUS/ID notification for USB for micro USB */
+	struct extcon_dev		*extcon;
 	u8				*digest;
 	bool				slave_fg_verify_flag;
 	u32				*ss_auth_data;
-	/* extcon for VBUS/ID notification for USB for micro USB */
-	struct extcon_dev		*extcon;
 	u32				*thermal_levels;
 	const char			*wls_fw_name;
 	int				curr_thermal_level;
@@ -1600,6 +1600,7 @@ static enum power_supply_property usb_props[] = {
 	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
 	POWER_SUPPLY_PROP_USB_TYPE,
 	POWER_SUPPLY_PROP_TEMP,
+	POWER_SUPPLY_PROP_SCOPE,
 	POWER_SUPPLY_PROP_QUICK_CHARGE_TYPE,
 	POWER_SUPPLY_PROP_SCOPE,
 };
@@ -5568,6 +5569,11 @@ static int register_extcon_conn_type(struct battery_chg_dev *bcdev)
 	}
 
 	bcdev->connector_type = pst->prop[USB_CONNECTOR_TYPE];
+
+	if (pst->prop[USB_CONNECTOR_TYPE] != USB_CONNECTOR_TYPE_MICRO_USB)
+		return 0;
+
+	bcdev->connector_type = USB_CONNECTOR_TYPE_MICRO_USB;
 	bcdev->usb_prev_mode = EXTCON_NONE;
 
 	bcdev->extcon = devm_extcon_dev_allocate(bcdev->dev,
