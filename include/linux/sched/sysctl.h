@@ -46,6 +46,7 @@ extern unsigned int sysctl_sched_walt_rotate_big_tasks;
 extern unsigned int sysctl_sched_min_task_util_for_boost;
 extern unsigned int sysctl_sched_min_task_util_for_colocation;
 extern unsigned int sysctl_sched_asym_cap_sibling_freq_match_pct;
+extern unsigned int sysctl_sched_asym_cap_sibling_freq_match_pct;
 extern unsigned int sysctl_sched_coloc_downmigrate_ns;
 extern unsigned int sysctl_sched_task_unfilter_period;
 extern unsigned int sysctl_sched_busy_hyst_enable_cpus;
@@ -62,6 +63,7 @@ extern unsigned int sysctl_sched_prefer_spread;
 extern unsigned int sysctl_walt_rtg_cfs_boost_prio;
 extern unsigned int sysctl_walt_low_latency_task_threshold;
 extern unsigned int sysctl_sched_sync_hint_enable;
+extern unsigned int sysctl_sched_asym_cap_sibling_freq_match_en;
 
 extern int
 walt_proc_group_thresholds_handler(struct ctl_table *table, int write,
