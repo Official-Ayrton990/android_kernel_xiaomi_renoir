@@ -33107,10 +33107,18 @@ static const struct snd_soc_dapm_widget msm_qdsp6_widgets[] = {
 		"TX3_CDC_DMA_HOSTLESS Capture", 0, 0, 0, 0),
 	SND_SOC_DAPM_AIF_OUT("TX4_CDC_DMA_UL_US", "ULTRAOUND_HOSTLESS Capture",
 		0, 0, 0, 0),
+#if defined(CONFIG_TARGET_PRODUCT_CETUS)
+	SND_SOC_DAPM_AIF_IN("RX1_CDC_DMA_DL_US", "ULTRAOUND_HOSTLESS Playback",
+		0, 0, 0, 0),
+#elif defined(CONFIG_TARGET_PRODUCT_LISA)
+	SND_SOC_DAPM_AIF_IN("PRI_TDM_RX_1_DL_US", "ULTRAOUND_HOSTLESS Playback",
+		0, 0, 0, 0),
+#else
 	SND_SOC_DAPM_AIF_IN("TERT_TDM_RX_1_DL_US", "ULTRAOUND_HOSTLESS Playback",
 		0, 0, 0, 0),
 	SND_SOC_DAPM_AIF_OUT("TX4_CDC_DMA_UL_HL",
 		"TX4_CDC_DMA_HOSTLESS Capture", 0, 0, 0, 0),
+#endif
 	SND_SOC_DAPM_AIF_OUT("CPE_LSM_UL_HL", "CPE LSM capture",
 		0, 0, 0, 0),
 	SND_SOC_DAPM_AIF_IN("SLIM1_DL_HL", "SLIMBUS1_HOSTLESS Playback",
