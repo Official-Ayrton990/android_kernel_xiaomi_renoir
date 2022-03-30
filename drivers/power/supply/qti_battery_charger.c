@@ -26,6 +26,9 @@
 #include <drm/mi_disp_notifier.h>
 #include <linux/thermal.h>
 #include <linux/hwid.h>
+#ifdef CONFIG_DEBUG_POWER_MI
+#include <linux/power_debug.h>
+#endif
 #include "qti_typec_class.h"
 
 #define MSG_OWNER_BC			32778
@@ -1734,6 +1737,17 @@ static int battery_psy_get_prop(struct power_supply *psy,
 		if(bcdev->fake_soc >= 0 && bcdev->fake_soc <= 100)
 			pval->intval = bcdev->fake_soc;
 
+		/*only for test mode and uncharge state */
+#ifdef CONFIG_DEBUG_POWER_MI
+     if (power_debug_print_enabled())
+         pr_debug(" power_save usb_psy_desc.type=%d, init pval->intval=%d \n",usb_psy_desc.type ,pval->intval);
+	  //if (usb_psy_desc.type == POWER_SUPPLY_TYPE_UNKNOWN)
+	   {
+	     pval->intval = mi_power_save_battery_cave(pval->intval);
+	     if (power_debug_print_enabled())
+			pr_debug(" power_save after pval->intval=%d \n",pval->intval);
+	   }
+#endif
 		break;
 	case POWER_SUPPLY_PROP_TEMP:
 #if defined(CONFIG_BQ_FUEL_GAUGE)
