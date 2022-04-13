@@ -3018,13 +3018,11 @@ static int tfa98xx_mute(struct snd_soc_dai *dai, int mute, int stream)
 		}
 #endif
 		tfa_dev_stop(tfa98xx->tfa);
-#if defined(CONFIG_TARGET_PRODUCT_RENOIR)
 		if (stream == SNDRV_PCM_STREAM_PLAYBACK){
 			if(gpio_is_valid(tfa98xx->spk_sw_gpio)){
 				gpio_direction_output(tfa98xx->spk_sw_gpio,0);
 			}
 		}
-#endif
 		tfa98xx->dsp_init = TFA98XX_DSP_INIT_STOPPED;
 		mutex_unlock(&tfa98xx->dsp_lock);
         if(tfa98xx->flags & TFA98XX_FLAG_ADAPT_NOISE_MODE)
@@ -3033,7 +3031,6 @@ static int tfa98xx_mute(struct snd_soc_dai *dai, int mute, int stream)
 	else {
 		if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
 			tfa98xx->pstream = 1;
-#if defined(CONFIG_TARGET_PRODUCT_RENOIR)
 			if(strcmp (tfa_cont_profile_name (tfa98xx, tfa98xx_mixer_profile), "handset")== 0){
 				if(gpio_is_valid(tfa98xx->spk_sw_gpio)){
 					gpio_direction_output(tfa98xx->spk_sw_gpio,1);
@@ -3044,7 +3041,6 @@ static int tfa98xx_mute(struct snd_soc_dai *dai, int mute, int stream)
 					gpio_direction_output(tfa98xx->spk_sw_gpio,0);
 				}
 			}
-#endif
 #ifdef TFA_NON_DSP_SOLUTION
 			if (tfa98xx->tfa->is_probus_device
 					&& (strcmp (tfa_cont_profile_name (tfa98xx, tfa98xx_mixer_profile), "handset") != 0)
