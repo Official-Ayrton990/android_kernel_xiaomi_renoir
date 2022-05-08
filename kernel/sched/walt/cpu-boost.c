@@ -3,6 +3,7 @@
  * Copyright (c) 2013-2015,2017,2019-2021, The Linux Foundation. All rights reserved.
  * Copyright (c) 2017, Paranoid Android.
  */
+
 #define pr_fmt(fmt) "cpu-boost: " fmt
 
 #include <linux/kernel.h>
@@ -74,52 +75,41 @@ static struct task_struct *cpu_boost_worker_thread;
 
 #define MIN_INPUT_INTERVAL (100 * USEC_PER_MSEC)
 
-static DEFINE_PER_CPU(struct freq_qos_request, qos_req);
-
 static ssize_t store_input_boost_freq(struct kobject *kobj,
 				      struct kobj_attribute *attr,
 				      const char *buf, size_t count)
 {
-	int i, ntokens = 0;
 	unsigned int val, cpu;
-	const char *cp = buf;
 	bool enabled = false;
 
-	while ((cp = strpbrk(cp + 1, " :")))
-		ntokens++;
-
-	/* single number: apply to all CPUs */
-	if (!ntokens) {
-		if (sscanf(buf, "%u\n", &val) != 1)
-			return -EINVAL;
-		for_each_possible_cpu(i)
-			per_cpu(sync_info, i).input_boost_freq = val;
+	/* apply to all CPUs */
+		for_each_possible_cpu(cpu) {
+			if (cpumask_intersects(cpumask_of(cpu), cpu_lp_mask))
+				per_cpu(sync_info, cpu).input_boost_freq = val;
+			if (cpumask_intersects(cpumask_of(cpu), cpu_perf_mask))
+				per_cpu(sync_info, cpu).input_boost_freq = val;
+			if (cpumask_intersects(cpumask_of(cpu), cpu_prime_mask))
+				per_cpu(sync_info, cpu).input_boost_freq = val;
+		}
 		goto check_enable;
-	}
-
-	/* CPU:value pair */
-	if (!(ntokens % 2))
-		return -EINVAL;
-
-	cp = buf;
-	for (i = 0; i < ntokens; i += 2) {
-		if (sscanf(cp, "%u:%u", &cpu, &val) != 2)
-			return -EINVAL;
-		if (cpu >= num_possible_cpus())
-			return -EINVAL;
-
-		per_cpu(sync_info, cpu).input_boost_freq = val;
-		cp = strnchr(cp, PAGE_SIZE - (cp - buf), ' ');
-		cp++;
-	}
 
 check_enable:
-	for_each_possible_cpu(i) {
-		if (per_cpu(sync_info, i).input_boost_freq) {
-			enabled = true;
-			break;
-		}
+
+	for_each_possible_cpu(cpu) {
+		if (cpumask_intersects(cpumask_of(cpu), cpu_lp_mask) || per_cpu(sync_info, cpu).input_boost_freq) {
+				enabled = true;
+				break;
+			}
+		if (cpumask_intersects(cpumask_of(cpu), cpu_perf_mask) || per_cpu(sync_info, cpu).input_boost_freq) {
+				enabled = true;
+				break;
+			}
+		if (cpumask_intersects(cpumask_of(cpu), cpu_prime_mask) || per_cpu(sync_info, cpu).input_boost_freq) {
+				enabled = true;
+				break;
+			}
 	}
+
 	input_boost_enabled = enabled;
 
 	return count;
@@ -132,74 +122,104 @@ static ssize_t show_input_boost_freq(struct kobject *kobj,
 	struct cpu_sync *s;
 
 	for_each_possible_cpu(cpu) {
-		s = &per_cpu(sync_info, cpu);
-		cnt += snprintf(buf + cnt, PAGE_SIZE - cnt,
-				"%d:%u ", cpu, s->input_boost_freq);
+		if (cpumask_intersects(cpumask_of(cpu), cpu_lp_mask)) {
+			s = &per_cpu(sync_info, cpu);
+			cnt += snprintf(buf + cnt, PAGE_SIZE - cnt,
+						"%d:%u ", cpu, s->input_boost_freq);
+		}
+		if (cpumask_intersects(cpumask_of(cpu), cpu_perf_mask)) {
+			s = &per_cpu(sync_info, cpu);
+			cnt += snprintf(buf + cnt, PAGE_SIZE - cnt,
+						"%d:%u ", cpu, s->input_boost_freq);
+		}
+		if (cpumask_intersects(cpumask_of(cpu), cpu_prime_mask)) {
+			s = &per_cpu(sync_info, cpu);
+			cnt += snprintf(buf + cnt, PAGE_SIZE - cnt,
+						"%d:%u ", cpu, s->input_boost_freq);
+		}
 	}
+
 	cnt += snprintf(buf + cnt, PAGE_SIZE - cnt, "\n");
 	return cnt;
 }
 
 cpu_boost_attr_rw(input_boost_freq);
 
-static void boost_adjust_notify(struct cpufreq_policy *policy)
+/*
+ * The CPUFREQ_ADJUST notifier is used to override the current policy min to
+ * make sure policy min >= boost_min. The cpufreq framework then does the job
+ * of enforcing the new policy.
+ */
+static int boost_adjust_notify(struct notifier_block *nb, unsigned long val,
+				void *data)
 {
+	struct cpufreq_policy *policy = data;
 	unsigned int cpu = policy->cpu;
 	struct cpu_sync *s = &per_cpu(sync_info, cpu);
 	unsigned int ib_min = s->input_boost_min;
-	struct freq_qos_request *req = &per_cpu(qos_req, cpu);
-	int ret;
 
-	pr_debug("CPU%u policy min before boost: %u kHz\n",
+	switch (val) {
+	case CPUFREQ_ADJUST:
+		if (!ib_min)
+			break;
+
+		pr_debug("CPU%u policy min before boost: %u kHz\n",
 			 cpu, policy->min);
-	pr_debug("CPU%u boost min: %u kHz\n", cpu, ib_min);
+		pr_debug("CPU%u boost min: %u kHz\n", cpu, ib_min);
 
-	ret = freq_qos_update_request(req, ib_min);
+		cpufreq_verify_within_limits(policy, ib_min, UINT_MAX);
 
-	if (ret < 0)
-		pr_err("Failed to update freq constraint in boost_adjust: %d\n",
-								ib_min);
+		pr_debug("CPU%u policy min after boost: %u kHz\n",
+			 cpu, policy->min);
+		break;
+	}
 
-	pr_debug("CPU%u policy min after boost: %u kHz\n",
-		 cpu, policy->min);
-
-	return;
+	return NOTIFY_OK;
 }
+
+static struct notifier_block boost_adjust_nb = {
+	.notifier_call = boost_adjust_notify,
+};
 
 static void update_policy_online(void)
 {
-	unsigned int i;
-	struct cpufreq_policy *policy;
-	struct cpumask online_cpus;
+	unsigned int cpu;
+
 	/* Re-evaluate policy to trigger adjust notifier for online CPUs */
 	get_online_cpus();
-	online_cpus = *cpu_online_mask;
-	for_each_cpu(i, &online_cpus) {
-		policy = cpufreq_cpu_get(i);
-		if (!policy) {
-			pr_err("%s: cpufreq policy not found for cpu%d\n",
-							__func__, i);
-			return;
+	for_each_possible_cpu(cpu) {
+		if (cpu_online(cpu)) {
+			if (cpumask_intersects(cpumask_of(cpu), cpu_lp_mask))
+				cpufreq_update_policy(cpu);
+			if (cpumask_intersects(cpumask_of(cpu), cpu_perf_mask))
+				cpufreq_update_policy(cpu);
+			if (cpumask_intersects(cpumask_of(cpu), cpu_prime_mask))
+				cpufreq_update_policy(cpu);
 		}
-
-		cpumask_andnot(&online_cpus, &online_cpus,
-						policy->related_cpus);
-		boost_adjust_notify(policy);
 	}
 	put_online_cpus();
 }
 
 static void do_input_boost_rem(struct work_struct *work)
 {
-	unsigned int i, ret;
+	unsigned int cpu, ret;
 	struct cpu_sync *i_sync_info;
 
 	/* Reset the input_boost_min for all CPUs in the system */
 	pr_debug("Resetting input boost min for all CPUs\n");
-	for_each_possible_cpu(i) {
-		i_sync_info = &per_cpu(sync_info, i);
-		i_sync_info->input_boost_min = 0;
+
+	for_each_possible_cpu(cpu) {
+		if (cpumask_intersects(cpumask_of(cpu), cpu_lp_mask))
+			i_sync_info = &per_cpu(sync_info, cpu);
+			i_sync_info->input_boost_min = 0;
+		if (cpumask_intersects(cpumask_of(cpu), cpu_perf_mask))
+			i_sync_info = &per_cpu(sync_info, cpu);
+			i_sync_info->input_boost_min = 0;
+		if (cpumask_intersects(cpumask_of(cpu), cpu_prime_mask))
+			i_sync_info = &per_cpu(sync_info, cpu);
+			i_sync_info->input_boost_min = 0;
 	}
+
 
 	/* Update policies for all online CPUs */
 	update_policy_online();
@@ -214,7 +234,7 @@ static void do_input_boost_rem(struct work_struct *work)
 
 static void do_input_boost(struct kthread_work *work)
 {
-	unsigned int i, ret;
+	unsigned int cpu, ret;
 	struct cpu_sync *i_sync_info;
 
 	cancel_delayed_work_sync(&input_boost_rem);
@@ -225,9 +245,17 @@ static void do_input_boost(struct kthread_work *work)
 
 	/* Set the input_boost_min for all CPUs in the system */
 	pr_debug("Setting input boost min for all CPUs\n");
-	for_each_possible_cpu(i) {
-		i_sync_info = &per_cpu(sync_info, i);
-		i_sync_info->input_boost_min = i_sync_info->input_boost_freq;
+
+	for_each_possible_cpu(cpu) {
+		if (cpumask_intersects(cpumask_of(cpu), cpu_lp_mask))
+			i_sync_info = &per_cpu(sync_info, cpu);
+			i_sync_info->input_boost_min = i_sync_info->input_boost_freq;
+		if (cpumask_intersects(cpumask_of(cpu), cpu_perf_mask))
+			i_sync_info = &per_cpu(sync_info, cpu);
+			i_sync_info->input_boost_min = i_sync_info->input_boost_freq;
+		if (cpumask_intersects(cpumask_of(cpu), cpu_prime_mask))
+			i_sync_info = &per_cpu(sync_info, cpu);
+			i_sync_info->input_boost_min = i_sync_info->input_boost_freq;
 	}
 
 	/* Update policies for all online CPUs */
@@ -340,8 +368,6 @@ int cpu_boost_init(void)
 {
 	int cpu, ret;
 	struct cpu_sync *s;
-	struct cpufreq_policy *policy;
-	struct freq_qos_request *req;
 	struct sched_param param = { .sched_priority = MAX_RT_PRIO - 2 };
 
 	kthread_init_worker(&cpu_boost_worker);
@@ -355,25 +381,18 @@ int cpu_boost_init(void)
 	INIT_DELAYED_WORK(&input_boost_rem, do_input_boost_rem);
 
 	for_each_possible_cpu(cpu) {
-		s = &per_cpu(sync_info, cpu);
-		s->cpu = cpu;
-		req = &per_cpu(qos_req, cpu);
-		policy = cpufreq_cpu_get(cpu);
-		if (!policy) {
-			pr_err("%s: cpufreq policy not found for cpu%d\n",
-							__func__, cpu);
-			return -ESRCH;
-		}
-
-		ret = freq_qos_add_request(&policy->constraints, req,
-						FREQ_QOS_MIN, policy->min);
-		if (ret < 0) {
-			pr_err("%s: Failed to add freq constraint (%d)\n",
-							__func__, ret);
-			return ret;
-		}
-
+		if (cpumask_intersects(cpumask_of(cpu), cpu_lp_mask))
+			s = &per_cpu(sync_info, cpu);
+			s->cpu = cpu;
+		if (cpumask_intersects(cpumask_of(cpu), cpu_perf_mask))
+			s = &per_cpu(sync_info, cpu);
+			s->cpu = cpu;
+		if (cpumask_intersects(cpumask_of(cpu), cpu_prime_mask))
+			s = &per_cpu(sync_info, cpu);
+			s->cpu = cpu;
 	}
+
+	cpufreq_register_notifier(&boost_adjust_nb, CPUFREQ_POLICY_NOTIFIER);
 
 	cpu_boost_kobj = kobject_create_and_add("cpu_boost",
 						&cpu_subsys.dev_root->kobj);
