@@ -18,6 +18,7 @@
 #include <linux/pm_qos.h>
 #include <linux/sched/rt.h>
 #include <uapi/linux/sched/types.h>
+#include <linux/devfreq_boost.h>
 
 #include "qc_vas.h"
 
@@ -241,7 +242,7 @@ static void do_input_boost(struct kthread_work *work)
 		else
 			sched_boost_active = true;
 	}
-
+	devfreq_boost_kick(DEVFREQ_MSM_CPUBW);
 	schedule_delayed_work(&input_boost_rem, msecs_to_jiffies(input_boost_ms));
 }
 
