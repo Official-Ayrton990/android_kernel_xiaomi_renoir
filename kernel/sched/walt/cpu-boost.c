@@ -65,6 +65,11 @@ show_one(sched_boost_on_input);
 store_one(sched_boost_on_input);
 cpu_boost_attr_rw(sched_boost_on_input);
 
+static unsigned int cpu_ddr_boost_on_input;
+show_one(cpu_ddr_boost_on_input);
+store_one(cpu_ddr_boost_on_input);
+cpu_boost_attr_rw(cpu_ddr_boost_on_input);
+
 static bool sched_boost_active;
 
 static struct delayed_work input_boost_rem;
@@ -242,7 +247,11 @@ static void do_input_boost(struct kthread_work *work)
 		else
 			sched_boost_active = true;
 	}
-	devfreq_boost_kick(DEVFREQ_MSM_CPUBW);
+
+	if (cpu_ddr_boost_on_input > 0) {
+		devfreq_boost_kick(DEVFREQ_MSM_CPUBW);
+	}
+
 	schedule_delayed_work(&input_boost_rem, msecs_to_jiffies(input_boost_ms));
 }
 
@@ -388,6 +397,11 @@ int cpu_boost_init(void)
 	ret = sysfs_create_file(cpu_boost_kobj, &input_boost_freq_attr.attr);
 	if (ret)
 		pr_err("Failed to create input_boost_freq node: %d\n", ret);
+
+	ret = sysfs_create_file(cpu_boost_kobj,
+				&cpu_ddr_boost_on_input_attr.attr);
+	if (ret)
+		pr_err("Failed to create cpu_ddr_boost_on_input node: %d\n", ret);
 
 	ret = sysfs_create_file(cpu_boost_kobj,
 				&sched_boost_on_input_attr.attr);
