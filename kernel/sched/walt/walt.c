@@ -132,6 +132,8 @@ unsigned int sysctl_sched_capacity_margin_up[MAX_MARGIN_LEVELS] = {
 			[0 ... MAX_MARGIN_LEVELS-1] = 1078}; /* ~5% margin */
 unsigned int sysctl_sched_capacity_margin_down[MAX_MARGIN_LEVELS] = {
 			[0 ... MAX_MARGIN_LEVELS-1] = 1205}; /* ~15% margin */
+
+unsigned int sysctl_walt_cpu_high_irqload = 95;
 static unsigned int walt_cpu_high_irqload;
 
 unsigned int sysctl_sched_walt_rotate_big_tasks;
@@ -665,23 +667,31 @@ __cpu_util_freq_walt(int cpu, struct walt_cpu_load *walt_load)
 unsigned long
 cpu_util_freq_walt(int cpu, struct walt_cpu_load *walt_load)
 {
-	struct walt_cpu_load wl_other = {0};
-	unsigned long util = 0, util_other = 0;
+	static unsigned long util_other;
+	static struct walt_cpu_load wl_other;
+	unsigned long util = 0;
 	unsigned long capacity = capacity_orig_of(cpu);
-	int i, mpct = sysctl_sched_asym_cap_sibling_freq_match_pct;
+	int mpct = sysctl_sched_asym_cap_sibling_freq_match_pct;
+	int max_cap_cpu;
 
-	if (!cpumask_test_cpu(cpu, &asym_cap_sibling_cpus))
+	if (!cpumask_test_cpu(cpu, &asym_cap_sibling_cpus) &&
+		!(sysctl_sched_asym_cap_sibling_freq_match_en &&
+		cpumask_test_cpu(cpu, &asym_freq_match_cpus)))
 		return __cpu_util_freq_walt(cpu, walt_load);
 
-	for_each_cpu(i, &asym_cap_sibling_cpus) {
-		if (i == cpu)
-			util = __cpu_util_freq_walt(cpu, walt_load);
-		else
-			util_other = __cpu_util_freq_walt(i, &wl_other);
-	}
+	/* FIXME: Prime always last cpu */
+	max_cap_cpu = cpumask_last(&asym_freq_match_cpus);
+	util = __cpu_util_freq_walt(cpu, walt_load);
 
-	if (cpu == cpumask_last(&asym_cap_sibling_cpus))
+	if (cpu != max_cap_cpu) {
+		if (cpumask_first(&asym_freq_match_cpus) == cpu)
+			util_other =
+				__cpu_util_freq_walt(max_cap_cpu, &wl_other);
+		else
+			goto out;
+	} else {
 		mpct = 100;
+	}
 
 	util = ADJUSTED_ASYM_CAP_CPU_UTIL(util, util_other, mpct);
 
@@ -689,6 +699,18 @@ cpu_util_freq_walt(int cpu, struct walt_cpu_load *walt_load)
 						   mpct);
 	walt_load->pl = ADJUSTED_ASYM_CAP_CPU_UTIL(walt_load->pl, wl_other.pl,
 						   mpct);
+out:
+	if (cpu != max_cap_cpu) {
+		if (util > util_other) {
+			util_other = util;
+			wl_other.nl = walt_load->nl;
+		}
+		if (wl_other.pl < walt_load->pl)
+			wl_other.pl = walt_load->pl;
+	} else {
+		util_other = 0;
+		memset(&wl_other, 0, sizeof(wl_other));
+	}
 
 	return (util >= capacity) ? capacity : util;
 }
@@ -2979,6 +3001,14 @@ void walt_update_cluster_topology(void)
 				   &asym_cap_sibling_cpus, &cluster->cpus);
 	}
 
+	if (num_sched_clusters > 2) {
+		for_each_sched_cluster(cluster) {
+			if (!is_min_capacity_cluster(cluster))
+				cpumask_or(&asym_freq_match_cpus,
+					&asym_freq_match_cpus, &cluster->cpus);
+		}
+	}
+
 	if (cpumask_weight(&asym_cap_sibling_cpus) == 1)
 		cpumask_clear(&asym_cap_sibling_cpus);
 
@@ -3740,7 +3770,6 @@ static inline void
 walt_irq_work_migration(struct irq_work *irq_work)
 {
 	struct walt_sched_cluster *cluster;
-	bool is_asym_migration = false;
 	cpumask_t tmp_mask;
 	u64 total_grp_load = 0, min_cluster_grp_load = 0;
 	int cpu;
@@ -3795,11 +3824,6 @@ walt_irq_work_migration(struct irq_work *irq_work)
 				aggr_grp_load += rq->wrq.grp_time.prev_runnable_sum;
 			}
 
-			if (cpumask_test_cpu(cpu, &freq_match_cpus) &&
-				cpumask_test_cpu(cpu, &tmp_mask)) {
-					is_asym_migration = true;
-					cpumask_clear_cpu(cpu, &tmp_mask);
-			}
 		}
 
 		cluster->aggr_grp_load = aggr_grp_load;
@@ -3829,9 +3853,6 @@ walt_irq_work_migration(struct irq_work *irq_work)
 			int flag = SCHED_CPUFREQ_WALT;
 
 			if (cpumask_test_cpu(cpu, &tmp_mask))
-				flag |= SCHED_CPUFREQ_INTERCLUSTER_MIG;
-
-			if (is_asym_migration && cpumask_test_cpu(cpu, &freq_match_cpus))
 				flag |= SCHED_CPUFREQ_INTERCLUSTER_MIG;
 
 			if (i != num_cpus)
@@ -3899,6 +3920,13 @@ void walt_irq_work_roll_over(struct irq_work *irq_work)
 	int level = 0;
 	u64 cur_jiffies_ts;
 	unsigned long flags;
+	struct cpumask freq_match_cpus;
+
+	if (sysctl_sched_asym_cap_sibling_freq_match_en &&
+		!cpumask_empty(&asym_freq_match_cpus))
+		cpumask_copy(&freq_match_cpus, &asym_freq_match_cpus);
+	else
+		cpumask_copy(&freq_match_cpus, &asym_cap_sibling_cpus);
 
 	for_each_cpu(cpu, cpu_possible_mask) {
 		if (level == 0)
@@ -3936,11 +3964,11 @@ void walt_irq_work_roll_over(struct irq_work *irq_work)
 	}
 
 	if (total_grp_load) {
-		if (cpumask_weight(&asym_cap_sibling_cpus)) {
+		if (cpumask_weight(&freq_match_cpus)) {
 			u64 big_grp_load =
 					  total_grp_load - min_cluster_grp_load;
 
-			for_each_cpu(cpu, &asym_cap_sibling_cpus)
+			for_each_cpu(cpu, &freq_match_cpus)
 				cpu_cluster(cpu)->aggr_grp_load = big_grp_load;
 		}
 		rtgb_active = is_rtgb_active();
@@ -4115,6 +4143,26 @@ int walt_proc_group_thresholds_handler(struct ctl_table *table, int write,
 	return ret;
 }
 
+int walt_high_irqload_handler(struct ctl_table *table, int write,
+				void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	int ret;
+	static DEFINE_MUTEX(mutex);
+
+	mutex_lock(&mutex);
+	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+
+	if (ret || !write) {
+		mutex_unlock(&mutex);
+		return ret;
+	}
+
+	walt_cpu_high_irqload = div64_u64((u64)sched_ravg_window *
+				sysctl_walt_cpu_high_irqload, (u64) 100);
+	mutex_unlock(&mutex);
+	return ret;
+}
+
 static void walt_init_window_dep(void)
 {
 	walt_cpu_util_freq_divisor =
@@ -4127,7 +4175,8 @@ static void walt_init_window_dep(void)
 	sched_init_task_load_windows_scaled =
 		scale_demand(sched_init_task_load_windows);
 
-	walt_cpu_high_irqload = div64_u64((u64)sched_ravg_window * 95, (u64) 100);
+	walt_cpu_high_irqload = mult_frac((u64)sched_ravg_window,
+				 sysctl_walt_cpu_high_irqload, (u64) 100);
 }
 
 static void walt_init_once(void)
