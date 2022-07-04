@@ -331,10 +331,10 @@
 
 			mi,mdss-dsi-hbm-on-command = [
 				15 01 00 00 00 00 02 53 E8
-				39 01 00 00 00 00 05 51 0F FF 00 00];
+				15 01 00 00 00 00 05 51 0F FF 00 00];
 			mi,mdss-dsi-hbm-off-command = [
 				15 01 00 00 00 00 02 53 28
-				39 01 00 00 00 00 05 51 07 FF 00 00];
+				15 01 00 00 00 00 05 51 07 FF 00 00];
 			mi,mdss-dsi-hbm-on-command-state = "dsi_lp_mode";
 			mi,mdss-dsi-hbm-off-command-state = "dsi_lp_mode";
 
@@ -370,10 +370,10 @@
 
 			mi,mdss-dsi-hbm-on-command = [
 				15 01 00 00 00 00 02 53 E8
-				39 01 00 00 00 00 05 51 0F FF 00 00];
+				15 01 00 00 00 00 05 51 0F FF 00 00];
 			mi,mdss-dsi-hbm-off-command = [
 				15 01 00 00 00 00 02 53 28
-				39 01 00 00 00 00 05 51 07 FF 00 00];
+				15 01 00 00 00 00 05 51 07 FF 00 00];
 			mi,mdss-dsi-hbm-on-command-state = "dsi_lp_mode";
 			mi,mdss-dsi-hbm-off-command-state = "dsi_lp_mode";
 
