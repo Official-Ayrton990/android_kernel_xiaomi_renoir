@@ -3252,6 +3252,7 @@ static const struct regmap_config tfa98xx_regmap = {
 	.cache_type = REGCACHE_NONE,
 };
 
+#if 0
 static void tfa98xx_irq_tfa2(struct tfa98xx *tfa98xx)
 {
 	pr_info("\n");
@@ -3278,6 +3279,7 @@ static irqreturn_t tfa98xx_irq(int irq, void *data)
 
 	return IRQ_HANDLED;
 }
+#endif
 
 static int tfa98xx_ext_reset(struct tfa98xx *tfa98xx)
 {
@@ -3937,7 +3939,7 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 	struct snd_soc_dai_driver *dai;
 	struct tfa98xx *tfa98xx;
 	struct device_node *np = i2c->dev.of_node;
-	int irq_flags;
+	//int irq_flags;
 	unsigned int reg;
 	int ret;
 
@@ -4145,7 +4147,7 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 		dev_err(&i2c->dev, "Failed to register TFA98xx: %d\n", ret);
 		return ret;
 	}
-
+#if 0
 	if (gpio_is_valid(tfa98xx->irq_gpio) &&
 		!(tfa98xx->flags & TFA98XX_FLAG_SKIP_INTERRUPTS)) {
 		/* register irq handler */
@@ -4165,6 +4167,7 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 		/* disable feature support if gpio was invalid */
 		tfa98xx->flags |= TFA98XX_FLAG_SKIP_INTERRUPTS;
 	}
+#endif
 #ifdef CONFIG_DEBUG_FS
 	if (no_start == 0)
 		tfa98xx_debug_init(tfa98xx, i2c);
