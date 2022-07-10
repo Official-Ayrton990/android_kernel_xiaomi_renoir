@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -152,6 +153,12 @@ QDF_STATUS ucfg_scan_deinit(void)
 }
 
 #ifdef FEATURE_WLAN_SCAN_PNO
+bool
+ucfg_is_6ghz_pno_scan_optimization_supported(struct wlan_objmgr_psoc *psoc)
+{
+	return wlan_psoc_nif_fw_ext_cap_get(psoc,
+					WLAN_SOC_PNO_SCAN_CONFIG_PER_CHANNEL);
+}
 
 QDF_STATUS ucfg_scan_pno_start(struct wlan_objmgr_vdev *vdev,
 	struct pno_scan_req_params *req)
@@ -176,6 +183,22 @@ QDF_STATUS ucfg_scan_pno_start(struct wlan_objmgr_vdev *vdev,
 		scan_vdev_obj->pno_in_progress = true;
 
 	return status;
+}
+
+void ucfg_scan_pno_add_all_valid_6g_channels(struct wlan_objmgr_vdev *vdev,
+					     struct pno_scan_req_params *req,
+					     uint8_t *num_scan_ch)
+{
+	struct wlan_objmgr_pdev *pdev;
+	struct chan_list *pno_chan_list = &req->networks_list[0].pno_chan_list;
+	bool is_colocated_6ghz = req->scan_policy_colocated_6ghz;
+
+	pdev = wlan_vdev_get_pdev(vdev);
+	if (!pdev)
+		return;
+
+	scm_add_all_valid_6g_channels(pdev, pno_chan_list, num_scan_ch,
+				      is_colocated_6ghz);
 }
 
 QDF_STATUS ucfg_scan_pno_stop(struct wlan_objmgr_vdev *vdev)
@@ -875,6 +898,8 @@ wlan_scan_global_init(struct wlan_objmgr_psoc *psoc,
 				cfg_get(psoc, CFG_ENABLE_WAKE_LOCK_IN_SCAN);
 	scan_obj->scan_def.active_dwell_2g =
 			 cfg_get(psoc, CFG_ACTIVE_MAX_2G_CHANNEL_TIME);
+	scan_obj->scan_def.min_dwell_time_6g =
+			cfg_get(psoc, CFG_MIN_6G_CHANNEL_TIME);
 	scan_obj->scan_def.active_dwell_6g =
 			 cfg_get(psoc, CFG_ACTIVE_MAX_6G_CHANNEL_TIME);
 	scan_obj->scan_def.passive_dwell_6g =
@@ -1076,6 +1101,7 @@ ucfg_scan_init_default_params(struct wlan_objmgr_vdev *vdev,
 	req->scan_req.scan_priority = def->scan_priority;
 	req->scan_req.dwell_time_active = def->active_dwell;
 	req->scan_req.dwell_time_active_2g = def->active_dwell_2g;
+	req->scan_req.min_dwell_time_6g = def->min_dwell_time_6g;
 	req->scan_req.dwell_time_active_6g = def->active_dwell_6g;
 	req->scan_req.dwell_time_passive_6g = def->passive_dwell_6g;
 	req->scan_req.dwell_time_passive = def->passive_dwell;

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -46,7 +47,9 @@ typedef void __iomem *A_target_id_t;
 typedef void *hif_handle_t;
 
 #if defined(HIF_IPCI) && defined(FEATURE_HAL_DELAYED_REG_WRITE)
-#define HIF_WORK_DRAIN_WAIT_CNT 10
+#define HIF_WORK_DRAIN_WAIT_CNT 50
+
+#define HIF_EP_WAKE_RESET_WAIT_CNT 10
 #endif
 
 #define HIF_TYPE_AR6002   2
@@ -325,6 +328,8 @@ struct hif_opaque_softc {
  * @HIF_EVENT_BH_SCHED: NAPI POLL scheduled event
  * @HIF_EVENT_SRNG_ACCESS_START: hal ring access start event
  * @HIF_EVENT_SRNG_ACCESS_END: hal ring access end event
+ * @HIF_EVENT_BH_COMPLETE: NAPI POLL completion event
+ * @HIF_EVENT_BH_FORCE_BREAK: NAPI POLL force break event
  */
 enum hif_event_type {
 	HIF_EVENT_IRQ_TRIGGER,
@@ -333,6 +338,8 @@ enum hif_event_type {
 	HIF_EVENT_BH_SCHED,
 	HIF_EVENT_SRNG_ACCESS_START,
 	HIF_EVENT_SRNG_ACCESS_END,
+	HIF_EVENT_BH_COMPLETE,
+	HIF_EVENT_BH_FORCE_BREAK,
 	/* Do check hif_hist_skip_event_record when adding new events */
 };
 
@@ -358,7 +365,7 @@ enum hif_system_pm_state {
 /* HIF_EVENT_HIST_MAX should always be power of 2 */
 #define HIF_EVENT_HIST_MAX		512
 #define HIF_NUM_INT_CONTEXTS		HIF_MAX_GROUP
-#define HIF_EVENT_HIST_ENABLE_MASK	0x3F
+#define HIF_EVENT_HIST_ENABLE_MASK	0xFF
 
 static inline uint64_t hif_get_log_timestamp(void)
 {
@@ -1075,10 +1082,12 @@ enum hif_ep_vote_type {
 /**
  * enum hif_ep_vote_access - hif ep vote access
  * HIF_EP_VOTE_ACCESS_ENABLE: Enable ep voting
+ * HIF_EP_VOTE_INTERMEDIATE_ACCESS: allow during transistion
  * HIF_EP_VOTE_ACCESS_DISABLE: disable ep voting
  */
 enum hif_ep_vote_access {
 	HIF_EP_VOTE_ACCESS_ENABLE,
+	HIF_EP_VOTE_INTERMEDIATE_ACCESS,
 	HIF_EP_VOTE_ACCESS_DISABLE
 };
 
@@ -1104,6 +1113,14 @@ enum hif_pm_link_state {
 					 with no response
  * HIF_PM_HTC_STATS_PUT_HTT_ERROR: PM stats for RTPM PUT for failed HTT packets
  * HIF_PM_HTC_STATS_PUT_HTC_CLEANUP: PM stats for RTPM PUT during HTC cleanup
+ * HIF_PM_HTC_STATS_GET_HTC_KICK_QUEUES: PM stats for RTPM GET done during
+ *                                       htc_kick_queues()
+ * HIF_PM_HTC_STATS_PUT_HTC_KICK_QUEUES: PM stats for RTPM PUT done during
+ *                                       htc_kick_queues()
+ * HIF_PM_HTC_STATS_GET_HTT_FETCH_PKTS: PM stats for RTPM GET while fetching
+ *                                      HTT packets from endpoint TX queue
+ * HIF_PM_HTC_STATS_PUT_HTT_FETCH_PKTS: PM stats for RTPM PUT while fetching
+ *                                      HTT packets from endpoint TX queue
  */
 enum hif_pm_htc_stats {
 	HIF_PM_HTC_STATS_GET_HTT_RESPONSE,
@@ -1112,6 +1129,10 @@ enum hif_pm_htc_stats {
 	HIF_PM_HTC_STATS_PUT_HTT_NO_RESPONSE,
 	HIF_PM_HTC_STATS_PUT_HTT_ERROR,
 	HIF_PM_HTC_STATS_PUT_HTC_CLEANUP,
+	HIF_PM_HTC_STATS_GET_HTC_KICK_QUEUES,
+	HIF_PM_HTC_STATS_PUT_HTC_KICK_QUEUES,
+	HIF_PM_HTC_STATS_GET_HTT_FETCH_PKTS,
+	HIF_PM_HTC_STATS_PUT_HTT_FETCH_PKTS,
 };
 
 #ifdef FEATURE_RUNTIME_PM
@@ -1398,6 +1419,7 @@ int hif_apps_enable_irqs_except_wake_irq(struct hif_opaque_softc *hif_ctx);
 int hif_apps_disable_irqs_except_wake_irq(struct hif_opaque_softc *hif_ctx);
 
 #ifdef FEATURE_RUNTIME_PM
+void hif_print_runtime_pm_prevent_list(struct hif_opaque_softc *hif_ctx);
 int hif_pre_runtime_suspend(struct hif_opaque_softc *hif_ctx);
 void hif_pre_runtime_resume(struct hif_opaque_softc *hif_ctx);
 int hif_runtime_suspend(struct hif_opaque_softc *hif_ctx);
@@ -1405,6 +1427,10 @@ int hif_runtime_resume(struct hif_opaque_softc *hif_ctx);
 void hif_process_runtime_suspend_success(struct hif_opaque_softc *hif_ctx);
 void hif_process_runtime_suspend_failure(struct hif_opaque_softc *hif_ctx);
 void hif_process_runtime_resume_success(struct hif_opaque_softc *hif_ctx);
+#else
+static inline void
+hif_print_runtime_pm_prevent_list(struct hif_opaque_softc *hif_ctx)
+{}
 #endif
 
 int hif_get_irq_num(struct hif_opaque_softc *scn, int *irq, uint32_t size);
@@ -1475,6 +1501,14 @@ int32_t hif_get_int_ctx_irq_num(struct hif_opaque_softc *softc,
  * Return: QDF_STATUS
  */
 QDF_STATUS hif_configure_ext_group_interrupts(struct hif_opaque_softc *hif_ctx);
+
+/**
+ * hif_deconfigure_ext_group_interrupts() - Deconfigure ext group intrrupts
+ * @hif_ctx: hif opaque context
+ *
+ * Return: None
+ */
+void hif_deconfigure_ext_group_interrupts(struct hif_opaque_softc *hif_ctx);
 
 /**
  * hif_register_ext_group() - API to register external group
@@ -1697,6 +1731,7 @@ hif_softc_to_hif_opaque_softc(struct hif_softc *hif_handle)
 
 #if defined(HIF_IPCI) && defined(FEATURE_HAL_DELAYED_REG_WRITE)
 QDF_STATUS hif_try_prevent_ep_vote_access(struct hif_opaque_softc *hif_ctx);
+void hif_set_ep_intermediate_vote_access(struct hif_opaque_softc *hif_ctx);
 void hif_allow_ep_vote_access(struct hif_opaque_softc *hif_ctx);
 void hif_set_ep_vote_access(struct hif_opaque_softc *hif_ctx,
 			    uint8_t type, uint8_t access);
@@ -1707,6 +1742,11 @@ static inline QDF_STATUS
 hif_try_prevent_ep_vote_access(struct hif_opaque_softc *hif_ctx)
 {
 	return QDF_STATUS_SUCCESS;
+}
+
+static inline void
+hif_set_ep_intermediate_vote_access(struct hif_opaque_softc *hif_ctx)
+{
 }
 
 static inline void

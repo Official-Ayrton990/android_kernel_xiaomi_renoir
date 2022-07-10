@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -757,6 +758,38 @@ mgmt_get_rvs_action_subtype(uint8_t action_code)
 }
 
 /**
+ * mgmt_get_twt_action_subtype() - gets twt action subtype
+ * @action_code: action code
+ *
+ * This function returns the subtype for twt action
+ * category.
+ *
+ * Return: mgmt frame type
+ */
+static enum mgmt_frame_type
+mgmt_get_twt_action_subtype(uint8_t action_code)
+{
+	enum mgmt_frame_type frm_type;
+
+	switch (action_code) {
+	case TWT_SETUP:
+		frm_type = MGMT_ACTION_TWT_SETUP;
+		break;
+	case TWT_TEARDOWN:
+		frm_type = MGMT_ACTION_TWT_TEARDOWN;
+		break;
+	case TWT_INFORMATION:
+		frm_type = MGMT_ACTION_TWT_INFORMATION;
+		break;
+	default:
+		frm_type = MGMT_FRM_UNSPECIFIED;
+		break;
+	}
+
+	return frm_type;
+}
+
+/**
  * mgmt_txrx_get_action_frm_subtype() - gets action frm subtype
  * @mpdu_data_ptr: pointer to mpdu data
  *
@@ -838,6 +871,10 @@ mgmt_txrx_get_action_frm_subtype(uint8_t *mpdu_data_ptr)
 	case ACTION_CATEGORY_RVS:
 		frm_type =
 			mgmt_get_rvs_action_subtype(action_hdr->action_code);
+		break;
+	case ACTION_CATEGORY_USIG:
+		frm_type =
+			mgmt_get_twt_action_subtype(action_hdr->action_code);
 		break;
 	default:
 		frm_type = MGMT_FRM_UNSPECIFIED;
@@ -1063,9 +1100,10 @@ QDF_STATUS tgt_mgmt_txrx_rx_frame_handler(
 	mgmt_type = (wh)->i_fc[0] & IEEE80211_FC0_TYPE_MASK;
 	mgmt_subtype = (wh)->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK;
 
-	if (mgmt_type != IEEE80211_FC0_TYPE_MGT) {
-		mgmt_txrx_err("Rx event doesn't conatin a mgmt. packet, %d",
-			mgmt_type);
+	if (mgmt_type != IEEE80211_FC0_TYPE_MGT &&
+	    mgmt_type != IEEE80211_FC0_TYPE_CTL) {
+		mgmt_txrx_err("Rx event doesn't contain a mgmt/ctrl packet, %d",
+			      mgmt_type);
 		qdf_nbuf_free(buf);
 		return QDF_STATUS_E_FAILURE;
 	}
@@ -1083,7 +1121,8 @@ QDF_STATUS tgt_mgmt_txrx_rx_frame_handler(
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	if ((mgmt_subtype == MGMT_SUBTYPE_BEACON ||
+	if (mgmt_type == IEEE80211_FC0_TYPE_MGT &&
+	    (mgmt_subtype == MGMT_SUBTYPE_BEACON ||
 	     mgmt_subtype == MGMT_SUBTYPE_PROBE_RESP) &&
 	    !(is_from_addr_valid && is_bssid_valid)) {
 		mgmt_txrx_debug_rl("from addr "QDF_MAC_ADDR_FMT" bssid addr "QDF_MAC_ADDR_FMT" not valid, modifying them",
@@ -1141,15 +1180,21 @@ QDF_STATUS tgt_mgmt_txrx_rx_frame_handler(
 		}
 	}
 
-	frm_type = mgmt_txrx_get_frm_type(mgmt_subtype, mpdu_data_ptr);
-	if (frm_type == MGMT_FRM_UNSPECIFIED) {
-		mgmt_txrx_debug_rl("Unspecified mgmt frame type fc: %x %x",
-				   wh->i_fc[0], wh->i_fc[1]);
-		qdf_nbuf_free(buf);
-		return QDF_STATUS_E_FAILURE;
+	if (mgmt_type == IEEE80211_FC0_TYPE_MGT) {
+		frm_type = mgmt_txrx_get_frm_type(mgmt_subtype, mpdu_data_ptr);
+		if (frm_type == MGMT_FRM_UNSPECIFIED) {
+			mgmt_txrx_debug_rl(
+			"Unspecified mgmt frame type fc: %x %x", wh->i_fc[0],
+								wh->i_fc[1]);
+			qdf_nbuf_free(buf);
+			return QDF_STATUS_E_FAILURE;
+		}
+	} else {
+		frm_type = MGMT_CTRL_FRAME;
 	}
 
-	if (!(mgmt_subtype == MGMT_SUBTYPE_BEACON ||
+	if (mgmt_type == IEEE80211_FC0_TYPE_MGT &&
+	    !(mgmt_subtype == MGMT_SUBTYPE_BEACON ||
 	      mgmt_subtype == MGMT_SUBTYPE_PROBE_RESP ||
 	      mgmt_subtype == MGMT_SUBTYPE_PROBE_REQ))
 		mgmt_txrx_debug("Rcvd mgmt frame subtype %x (frame type %u) from "QDF_MAC_ADDR_FMT", seq_num = %d, rssi = %d tsf_delta: %u",
@@ -1178,14 +1223,18 @@ QDF_STATUS tgt_mgmt_txrx_rx_frame_handler(
 		}
 	}
 
-	rx_handler = mgmt_txrx_psoc_ctx->mgmt_rx_comp_cb[MGMT_FRAME_TYPE_ALL];
-	if (rx_handler) {
-		status = wlan_mgmt_txrx_rx_handler_list_copy(rx_handler,
-				&rx_handler_head, &rx_handler_tail);
-		if (status != QDF_STATUS_SUCCESS) {
-			qdf_spin_unlock_bh(&mgmt_txrx_psoc_ctx->mgmt_txrx_psoc_ctx_lock);
-			qdf_nbuf_free(buf);
-			goto rx_handler_mem_free;
+	if (mgmt_type == IEEE80211_FC0_TYPE_MGT) {
+		rx_handler =
+		mgmt_txrx_psoc_ctx->mgmt_rx_comp_cb[MGMT_FRAME_TYPE_ALL];
+		if (rx_handler) {
+			status = wlan_mgmt_txrx_rx_handler_list_copy(
+				rx_handler, &rx_handler_head, &rx_handler_tail);
+			if (status != QDF_STATUS_SUCCESS) {
+				qdf_spin_unlock_bh(
+				  &mgmt_txrx_psoc_ctx->mgmt_txrx_psoc_ctx_lock);
+				qdf_nbuf_free(buf);
+				goto rx_handler_mem_free;
+			}
 		}
 	}
 

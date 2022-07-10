@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -115,21 +116,14 @@ static int hif_ce_msi_map_ce_to_irq(struct hif_softc *scn, int ce_id)
 int hif_ipci_bus_configure(struct hif_softc *hif_sc)
 {
 	int status = 0;
-	struct HIF_CE_state *hif_state = HIF_GET_CE_STATE(hif_sc);
 	uint8_t wake_ce_id;
 
 	hif_ce_prepare_config(hif_sc);
 
-	/* initialize sleep state adjust variables */
-	hif_state->sleep_timer_init = true;
-	hif_state->keep_awake_count = 0;
-	hif_state->fake_sleep = false;
-	hif_state->sleep_ticks = 0;
-
 	status = hif_wlan_enable(hif_sc);
 	if (status) {
 		hif_err("hif_wlan_enable error = %d", status);
-		goto timer_free;
+		return status;
 	}
 
 	A_TARGET_ACCESS_LIKELY(hif_sc);
@@ -161,11 +155,6 @@ unconfig_ce:
 disable_wlan:
 	A_TARGET_ACCESS_UNLIKELY(hif_sc);
 	hif_wlan_disable(hif_sc);
-
-timer_free:
-	qdf_timer_stop(&hif_state->sleep_timer);
-	qdf_timer_free(&hif_state->sleep_timer);
-	hif_state->sleep_timer_init = false;
 
 	hif_err("Failed, status = %d", status);
 	return status;
@@ -210,6 +199,8 @@ static int hif_ce_srng_msi_free_irq(struct hif_softc *scn)
 		msi_data = (ce_id % msi_data_count) + msi_irq_start;
 		irq = pld_get_msi_irq(scn->qdf_dev->dev, msi_data);
 
+		hif_ce_irq_remove_affinity_hint(irq);
+
 		hif_debug("%s: (ce_id %d, msi_data %d, irq %d)", __func__,
 			  ce_id, msi_data, irq);
 
@@ -225,7 +216,7 @@ static int hif_ce_srng_msi_free_irq(struct hif_softc *scn)
  *
  * Return: none
  */
-static void hif_ipci_deconfigure_grp_irq(struct hif_softc *scn)
+void hif_ipci_deconfigure_grp_irq(struct hif_softc *scn)
 {
 	int i, j, irq;
 	struct HIF_CE_state *hif_state = HIF_GET_CE_STATE(scn);
@@ -371,6 +362,22 @@ fail:
 
 int hif_ipci_bus_suspend_noirq(struct hif_softc *scn)
 {
+	/*
+	 * If it is system suspend case and wake-IRQ received
+	 * just before Kernel issuing suspend_noirq, that must
+	 * have scheduled CE2 tasklet, so suspend activity can
+	 * be aborted.
+	 * Similar scenario for runtime suspend case, would be
+	 * handled by hif_pm_runtime_check_and_request_resume
+	 * in hif_ce_interrupt_handler.
+	 *
+	 */
+	if (!hif_pm_runtime_get_monitor_wake_intr(GET_HIF_OPAQUE_HDL(scn)) &&
+	    hif_get_num_active_tasklets(scn)) {
+		hif_err("Tasklets are pending, abort sys suspend_noirq");
+		return -EBUSY;
+	}
+
 	return 0;
 }
 
@@ -824,6 +831,7 @@ int hif_force_wake_request(struct hif_opaque_softc *hif_handle)
 	if (pld_is_device_awake(scn->qdf_dev->dev) <= 0) {
 		hif_err("Unable to wake up mhi");
 		HIF_STATS_INC(ipci_scn, mhi_force_wake_failure, 1);
+		hif_force_wake_release(hif_handle);
 		return -EINVAL;
 	}
 	HIF_STATS_INC(ipci_scn, mhi_force_wake_success, 1);
@@ -880,13 +888,32 @@ int hif_prevent_link_low_power_states(struct hif_opaque_softc *hif)
 {
 	struct hif_softc *scn = HIF_GET_SOFTC(hif);
 	struct hif_ipci_softc *ipci_scn = HIF_GET_IPCI_SOFTC(scn);
-	uint32_t timeout = 0;
+	uint32_t start_time = 0, curr_time = 0;
+	uint32_t count = 0;
 
-	while (pld_is_pci_ep_awake(scn->qdf_dev->dev) &&
-	       timeout <= EP_WAKE_RESET_DELAY_TIMEOUT_US) {
-		qdf_sleep_us(EP_WAKE_RESET_DELAY_US);
-		timeout += EP_WAKE_RESET_DELAY_US;
+	if (pld_is_pci_ep_awake(scn->qdf_dev->dev) == -ENOTSUPP)
+		return 0;
+
+	if ((qdf_atomic_read(&scn->dp_ep_vote_access) ==
+	     HIF_EP_VOTE_ACCESS_DISABLE) &&
+	    (qdf_atomic_read(&scn->ep_vote_access) ==
+	    HIF_EP_VOTE_ACCESS_DISABLE)) {
+		hif_info_high("EP access disabled in flight skip vote");
+		return 0;
 	}
+
+	start_time = curr_time = qdf_system_ticks_to_msecs(qdf_system_ticks());
+	while (pld_is_pci_ep_awake(scn->qdf_dev->dev) &&
+	       curr_time <= start_time + EP_WAKE_RESET_DELAY_TIMEOUT_MS) {
+		if (count < EP_VOTE_POLL_TIME_CNT) {
+			qdf_udelay(EP_VOTE_POLL_TIME_US);
+			count++;
+		} else {
+			qdf_sleep_us(EP_WAKE_RESET_DELAY_US);
+		}
+		curr_time = qdf_system_ticks_to_msecs(qdf_system_ticks());
+	}
+
 
 	if (pld_is_pci_ep_awake(scn->qdf_dev->dev)) {
 		hif_err_rl(" EP state reset is not done to prevent l1");
@@ -900,12 +927,19 @@ int hif_prevent_link_low_power_states(struct hif_opaque_softc *hif)
 		return 0;
 	}
 
+	count = 0;
 	ipci_scn->prevent_l1 = true;
-	timeout = 0;
+	start_time = curr_time = qdf_system_ticks_to_msecs(qdf_system_ticks());
 	while (!pld_is_pci_ep_awake(scn->qdf_dev->dev) &&
-	       timeout <= EP_WAKE_DELAY_TIMEOUT_US) {
-		qdf_sleep_us(EP_WAKE_DELAY_US);
-		timeout += EP_WAKE_DELAY_US;
+	       curr_time <= start_time + EP_WAKE_DELAY_TIMEOUT_MS) {
+		if (count < EP_VOTE_POLL_TIME_CNT) {
+			qdf_udelay(EP_WAKE_RESET_DELAY_US);
+			count++;
+		} else {
+			qdf_sleep_us(EP_WAKE_DELAY_US);
+		}
+
+		curr_time = qdf_system_ticks_to_msecs(qdf_system_ticks());
 	}
 
 	if (pld_is_pci_ep_awake(scn->qdf_dev->dev) <= 0) {
@@ -931,10 +965,34 @@ void hif_allow_link_low_power_states(struct hif_opaque_softc *hif)
 
 int hif_ipci_enable_grp_irqs(struct hif_softc *scn)
 {
-	return hif_apps_grp_irqs_enable(GET_HIF_OPAQUE_HDL(scn));
+	struct hif_ipci_softc *ipci_scn = HIF_GET_IPCI_SOFTC(scn);
+	int status;
+
+	if (!ipci_scn->grp_irqs_disabled) {
+		hif_err("Unbalanced group IRQs Enable called");
+		qdf_assert_always(0);
+	}
+
+	status = hif_apps_grp_irqs_enable(GET_HIF_OPAQUE_HDL(scn));
+	if (!status)
+		ipci_scn->grp_irqs_disabled = false;
+
+	return status;
 }
 
 int hif_ipci_disable_grp_irqs(struct hif_softc *scn)
 {
-	return hif_apps_grp_irqs_disable(GET_HIF_OPAQUE_HDL(scn));
+	struct hif_ipci_softc *ipci_scn = HIF_GET_IPCI_SOFTC(scn);
+	int status;
+
+	if (ipci_scn->grp_irqs_disabled) {
+		hif_err("Unbalanced group IRQs disable called");
+		qdf_assert_always(0);
+	}
+
+	status = hif_apps_grp_irqs_disable(GET_HIF_OPAQUE_HDL(scn));
+	if (!status)
+		ipci_scn->grp_irqs_disabled = true;
+
+	return status;
 }
