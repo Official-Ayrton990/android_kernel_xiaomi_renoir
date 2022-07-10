@@ -64,6 +64,7 @@ static u32 sde_hw_util_log_mask = SDE_DBG_MASK_NONE;
 #define QSEED4_DEFAULT_PRELOAD_V 0x2
 #define QSEED4_DEFAULT_PRELOAD_H 0x4
 
+#define GET_REG_BLK_ID(c) (c->log_mask ? (ilog2(c->log_mask) + 1) : 0)
 typedef void (*scaler_lut_type)(struct sde_hw_blk_reg_map *,
 		struct sde_hw_scaler3_cfg *, u32);
 
