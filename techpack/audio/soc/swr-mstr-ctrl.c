@@ -2,6 +2,7 @@
 /*
  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
  * Copyright (C) 2021 XiaoMi, Inc.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/irq.h>
@@ -55,7 +56,6 @@
 
 #define ERR_AUTO_SUSPEND_TIMER_VAL 0x1
 
-#define SWRM_INTERRUPT_STATUS_MASK 0x1FDFD
 #define SWRM_LINK_STATUS_RETRY_CNT 100
 
 #define SWRM_ROW_48    48
@@ -1470,12 +1470,14 @@ static void swrm_copy_data_port_config(struct swr_master *master, u8 bank)
 					SWRS_DP_SAMPLE_CONTROL_1_BANK(slv_id,
 								bank));
 
-			reg[len] = SWRM_CMD_FIFO_WR_CMD;
-			val[len++] = SWR_REG_VAL_PACK(
+			if ((port_req->sinterval >> 8)& 0xFF) {
+				reg[len] = SWRM_CMD_FIFO_WR_CMD;
+				val[len++] = SWR_REG_VAL_PACK(
 					(port_req->sinterval >> 8)& 0xFF,
 					port_req->dev_num, 0x00,
 					SWRS_DP_SAMPLE_CONTROL_2_BANK(slv_id,
 								bank));
+			}
 
 			reg[len] = SWRM_CMD_FIFO_WR_CMD;
 			val[len++] = SWR_REG_VAL_PACK(port_req->offset1,

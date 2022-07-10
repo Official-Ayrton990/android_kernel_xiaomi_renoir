@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <sound/soc.h>
@@ -166,6 +167,11 @@ SND_SOC_DAILINK_DEFS(tx3_cdcdma_hostless,
 	DAILINK_COMP_ARRAY(COMP_CODEC("snd-soc-dummy", "snd-soc-dummy-dai")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-hostless")));
 
+SND_SOC_DAILINK_DEFS(tx4_cdcdma_hostless,
+	DAILINK_COMP_ARRAY(COMP_CPU("TX4_CDC_DMA_HOSTLESS")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("snd-soc-dummy", "snd-soc-dummy-dai")),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-hostless")));
+
 SND_SOC_DAILINK_DEFS(tert_mi2s_tx_hostless,
 	DAILINK_COMP_ARRAY(COMP_CPU("TERT_MI2S_TX_HOSTLESS")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("snd-soc-dummy", "snd-soc-dummy-dai")),
@@ -198,24 +204,8 @@ SND_SOC_DAILINK_DEFS(slimbus8_hostless,
 
 SND_SOC_DAILINK_DEFS(tx_cdcdma5_tx,
 	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-cdc-dma-dev.45115")),
-	DAILINK_COMP_ARRAY(COMP_CODEC("bolero_codec", "tx_macro_tx3"),
-			   COMP_CODEC("wcd938x_codec", "wcd938x_cdc")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("bolero_codec", "tx_macro_tx3")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-hostless")));
-
-SND_SOC_DAILINK_DEFS(multimedia31,
-	DAILINK_COMP_ARRAY(COMP_CPU("MultiMedia31")),
-	DAILINK_COMP_ARRAY(COMP_CODEC("snd-soc-dummy", "snd-soc-dummy-dai")),
-	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-dsp.0")));
-
-SND_SOC_DAILINK_DEFS(multimedia32,
-	DAILINK_COMP_ARRAY(COMP_CPU("MultiMedia32")),
-	DAILINK_COMP_ARRAY(COMP_CODEC("snd-soc-dummy", "snd-soc-dummy-dai")),
-	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-dsp.0")));
-
-SND_SOC_DAILINK_DEFS(afepcm_tx1,
-	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-dev.242")),
-	DAILINK_COMP_ARRAY(COMP_CODEC("msm-stub-codec.1", "msm-stub-tx")),
-	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-afe")));
 
 /* BE dai-links */
 SND_SOC_DAILINK_DEFS(afe_pcm_rx,
@@ -322,37 +312,37 @@ SND_SOC_DAILINK_DEFS(pri_mi2s_rx,
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
 
 SND_SOC_DAILINK_DEFS(pri_mi2s_tx,
-	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.1")),
+	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.0")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("msm-stub-codec.1", "msm-stub-tx")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
 
 SND_SOC_DAILINK_DEFS(sec_mi2s_rx,
-	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.2")),
+	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.1")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("msm-stub-codec.1", "msm-stub-rx")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
 
 SND_SOC_DAILINK_DEFS(sec_mi2s_tx,
-	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.3")),
+	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.1")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("msm-stub-codec.1", "msm-stub-tx")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
 
 SND_SOC_DAILINK_DEFS(tert_mi2s_rx,
-	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.4")),
+	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.2")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("msm-stub-codec.1", "msm-stub-rx")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
 
 SND_SOC_DAILINK_DEFS(tert_mi2s_tx,
-	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.5")),
+	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.2")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("msm-stub-codec.1", "msm-stub-tx")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
 
 SND_SOC_DAILINK_DEFS(quat_mi2s_rx,
-	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.6")),
+	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.3")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("msm-stub-codec.1", "msm-stub-rx")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
 
 SND_SOC_DAILINK_DEFS(quat_mi2s_tx,
-	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.7")),
+	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-q6-mi2s.3")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("msm-stub-codec.1", "msm-stub-tx")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
 
@@ -399,44 +389,46 @@ SND_SOC_DAILINK_DEFS(quat_auxpcm_tx,
 SND_SOC_DAILINK_DEFS(rx_dma_rx0,
 	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-cdc-dma-dev.45104")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("bolero_codec", "rx_macro_rx1"),
-			   COMP_CODEC("wcd938x_codec", "wcd938x_cdc"),
+               COMP_CODEC("wsa-codec0", "wsa_rx0"),
+               COMP_CODEC("wsa-codec1", "wsa_rx1"),
+			   COMP_CODEC("rouleur_codec", "rouleur_cdc"),
 			   COMP_CODEC("wcd937x_codec", "wcd937x_cdc")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
 
 SND_SOC_DAILINK_DEFS(rx_dma_rx1,
 	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-cdc-dma-dev.45106")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("bolero_codec", "rx_macro_rx2"),
-			   COMP_CODEC("wsa-codec0", "wsa_rx0"),
-			   COMP_CODEC("wsa-codec1", "wsa_rx1"),
-			   COMP_CODEC("wcd938x_codec", "wcd938x_cdc"),
+               COMP_CODEC("wsa-codec0", "wsa_rx0"),
+               COMP_CODEC("wsa-codec1", "wsa_rx1"),
+			   COMP_CODEC("rouleur_codec", "rouleur_cdc"),
 			   COMP_CODEC("wcd937x_codec", "wcd937x_cdc")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
 
 SND_SOC_DAILINK_DEFS(rx_dma_rx2,
 	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-cdc-dma-dev.45108")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("bolero_codec", "rx_macro_rx3"),
-			   COMP_CODEC("wcd938x_codec", "wcd938x_cdc"),
+			   COMP_CODEC("rouleur_codec", "rouleur_cdc"),
 			   COMP_CODEC("wcd937x_codec", "wcd937x_cdc")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
 
 SND_SOC_DAILINK_DEFS(rx_dma_rx3,
 	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-cdc-dma-dev.45110")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("bolero_codec", "rx_macro_rx4"),
-			   COMP_CODEC("wcd938x_codec", "wcd938x_cdc"),
+			   COMP_CODEC("rouleur_codec", "rouleur_cdc"),
 			   COMP_CODEC("wcd937x_codec", "wcd937x_cdc")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
 
 SND_SOC_DAILINK_DEFS(tx_dma_tx3,
 	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-cdc-dma-dev.45111")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("bolero_codec", "tx_macro_tx1"),
-			   COMP_CODEC("wcd938x_codec", "wcd938x_cdc"),
+			   COMP_CODEC("rouleur_codec", "rouleur_cdc"),
 			   COMP_CODEC("wcd937x_codec", "wcd937x_cdc")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
 
 SND_SOC_DAILINK_DEFS(tx_dma_tx4,
 	DAILINK_COMP_ARRAY(COMP_CPU("msm-dai-cdc-dma-dev.45113")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("bolero_codec", "tx_macro_tx2"),
-			   COMP_CODEC("wcd938x_codec", "wcd938x_cdc"),
+			   COMP_CODEC("rouleur_codec", "rouleur_cdc"),
 			   COMP_CODEC("wcd937x_codec", "wcd937x_cdc")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("msm-pcm-routing")));
 
