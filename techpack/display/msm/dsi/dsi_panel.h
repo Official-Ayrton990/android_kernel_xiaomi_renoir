@@ -261,8 +261,6 @@ struct dsi_panel {
 	int power_mode;
 	enum dsi_panel_physical_type panel_type;
 
-	int hbm_mode;
-
 	struct dsi_tlmm_gpio *tlmm_gpio;
 	u32 tlmm_gpio_count;
 
@@ -405,7 +403,4 @@ int dsi_panel_create_cmd_packets(const char *data, u32 length, u32 count,
 void dsi_panel_destroy_cmd_packets(struct dsi_panel_cmd_set *set);
 
 void dsi_panel_dealloc_cmd_packets(struct dsi_panel_cmd_set *set);
-
-int dsi_panel_apply_hbm_mode(struct dsi_panel *panel);
-
 #endif /* _DSI_PANEL_H_ */
