@@ -2,7 +2,6 @@
 /*
  * Copyright (c) 2013-2015,2017,2019-2021, The Linux Foundation. All rights reserved.
  * Copyright (c) 2017, Paranoid Android.
- * Copyright (c) 2022, Carlos Ayrton López Arroyo.
  */
 #define pr_fmt(fmt) "cpu-boost: " fmt
 
@@ -149,20 +148,49 @@ static ssize_t show_input_boost_freq(struct kobject *kobj,
 
 cpu_boost_attr_rw(input_boost_freq);
 
+static void boost_adjust_notify(struct cpufreq_policy *policy)
+{
+	unsigned int cpu = policy->cpu;
+	struct cpu_sync *s = &per_cpu(sync_info, cpu);
+	unsigned int ib_min = s->input_boost_min;
+	struct freq_qos_request *req = &per_cpu(qos_req, cpu);
+	int ret;
+
+	pr_debug("CPU%u policy min before boost: %u kHz\n",
+			 cpu, policy->min);
+	pr_debug("CPU%u boost min: %u kHz\n", cpu, ib_min);
+
+	ret = freq_qos_update_request(req, ib_min);
+
+	if (ret < 0)
+		pr_err("Failed to update freq constraint in boost_adjust: %d\n",
+								ib_min);
+
+	pr_debug("CPU%u policy min after boost: %u kHz\n",
+		 cpu, policy->min);
+
+	return;
+}
+
 static void update_policy_online(void)
 {
 	unsigned int i;
+	struct cpufreq_policy *policy;
+	struct cpumask online_cpus;
 	/* Re-evaluate policy to trigger adjust notifier for online CPUs */
 	get_online_cpus();
-	for_each_possible_cpu(i) {
-		if (cpu_online(i)) {
-			if (cpumask_intersects(cpumask_of(i), cpu_lp_mask))
-				cpufreq_update_policy(i);
-			if (cpumask_intersects(cpumask_of(i), cpu_perf_mask))
-				cpufreq_update_policy(i);
-			if (cpumask_intersects(cpumask_of(i), cpu_prime_mask))
-				cpufreq_update_policy(i);
+	online_cpus = *cpu_online_mask;
+	for_each_cpu(i, &online_cpus) {
+		policy = cpufreq_cpu_get(i);
+		if (!policy) {
+			pr_err("%s: cpufreq policy not found for cpu%d\n",
+							__func__, i);
+			return;
 		}
+
+		cpumask_andnot(&online_cpus, &online_cpus,
+						policy->related_cpus);
+		boost_adjust_notify(policy);
 	}
 	put_online_cpus();
 }
