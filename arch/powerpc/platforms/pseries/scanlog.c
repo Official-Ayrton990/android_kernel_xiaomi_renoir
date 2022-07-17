@@ -152,12 +152,13 @@ static int scanlog_release(struct inode * inode, struct file * file)
 	return 0;
 }
 
-static const struct proc_ops scanlog_proc_ops = {
-	.proc_read	= scanlog_read,
-	.proc_write	= scanlog_write,
-	.proc_open	= scanlog_open,
-	.proc_release	= scanlog_release,
-	.proc_lseek	= noop_llseek,
+static const struct file_operations scanlog_fops = {
+	.owner		= THIS_MODULE,
+	.read		= scanlog_read,
+	.write		= scanlog_write,
+	.open		= scanlog_open,
+	.release	= scanlog_release,
+	.llseek		= noop_llseek,
 };
 
 static int __init scanlog_init(void)
@@ -175,7 +176,7 @@ static int __init scanlog_init(void)
 		goto err;
 
 	ent = proc_create("powerpc/rtas/scan-log-dump", 0400, NULL,
-			  &scanlog_proc_ops);
+			  &scanlog_fops);
 	if (!ent)
 		goto err;
 	return 0;
