@@ -43,6 +43,7 @@
 #include <linux/fb.h>
 #include <linux/pinctrl/qcom-pinctrl.h>
 #include <drm/drm_bridge.h>
+#include <drm/mi_disp_notifier.h>
 
 #define FPC_GPIO_NO_DEFAULT -1
 #define FPC_GPIO_NO_DEFINED -2
@@ -114,6 +115,8 @@ struct fpc1020_data {
 
 	atomic_t wakeup_enabled;	/* Used both in ISR and non-ISR */
 	int irqf;
+	struct notifier_block notifier;
+	bool fb_black;
 };
 
 static int reset_gpio_res(struct fpc1020_data *fpc1020);
@@ -862,6 +865,44 @@ static int fpc1020_request_named_gpio(struct fpc1020_data *fpc1020,
 	return 0;
 }
 
+static int fpc_fb_notif_callback(struct notifier_block *nb,
+		unsigned long val, void *data)
+{
+	struct fpc1020_data *fpc1020 = container_of(nb, struct fpc1020_data,
+						    notifier);
+	struct mi_disp_notifier *evdata = data;
+	unsigned int blank;
+
+	if (!fpc1020)
+		return 0;
+
+	if (val != MI_DISP_DPMS_EVENT)
+		return 0;
+
+	printk("hml [info] %s value = %d\n", __func__, (int)val);
+
+	if (evdata && evdata->data && val == MI_DISP_DPMS_EVENT) {
+		blank = *(int *)(evdata->data);
+		switch (blank) {
+		case MI_DISP_DPMS_POWERDOWN:
+			fpc1020->fb_black = true;
+			break;
+		case MI_DISP_DPMS_ON:
+			fpc1020->fb_black = false;
+			break;
+		default:
+			printk("%s defalut\n", __func__);
+			break;
+		}
+	}
+	return NOTIFY_OK;
+}
+
+
+static struct notifier_block fpc_notif_block = {
+	.notifier_call = fpc_fb_notif_callback,
+};
+
 static int fpc1020_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -946,6 +987,11 @@ static int fpc1020_probe(struct platform_device *pdev)
 		(void)device_prepare(fpc1020, true);
 	}
 
+
+	fpc1020->fb_black = false;
+	fpc1020->notifier = fpc_notif_block;
+	mi_disp_register_client(&fpc1020->notifier);
+
 	//rc = hw_reset(fpc1020);
 
 	if (msm_gpio_mpm_wake_set(121, true)) {
@@ -964,6 +1010,8 @@ exit:
 static int fpc1020_remove(struct platform_device *pdev)
 {
 	struct fpc1020_data *fpc1020 = platform_get_drvdata(pdev);
+
+	mi_disp_unregister_client(&fpc1020->notifier);
 	sysfs_remove_group(&pdev->dev.kobj, &attribute_group);
 	mutex_destroy(&fpc1020->lock);
 	wakeup_source_unregister(fpc1020->ttw_wl);
