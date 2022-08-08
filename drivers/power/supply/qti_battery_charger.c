@@ -70,11 +70,7 @@ enum usb_connector_type {
 	USB_CONNECTOR_TYPE_MICRO_USB,
 };
 
-#if defined(CONFIG_BQ_FG_1S)
 #define BATTERY_DIGEST_LEN 32
-#else
-#define BATTERY_DIGEST_LEN 20
-#endif
 #define BATTERY_SS_AUTH_DATA_LEN 4
 
 #define ADAP_TYPE_SDP		1
