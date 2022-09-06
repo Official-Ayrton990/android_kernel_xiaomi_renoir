@@ -347,7 +347,7 @@ int cpu_boost_init(void)
 	struct cpu_sync *s;
 	struct cpufreq_policy *policy;
 	struct freq_qos_request *req;
-	struct sched_param param = { .sched_priority = MAX_RT_PRIO - 2 };
+	struct sched_param param = { .sched_priority = MAX_RT_PRIO - 1 };
 
 	kthread_init_worker(&cpu_boost_worker);
 	cpu_boost_worker_thread = kthread_run_perf_critical(cpu_perf_mask, kthread_worker_fn,
