@@ -807,8 +807,8 @@ static void binder_transaction_priority(struct binder_thread *thread,
 		// We boost some app process to FIFO, but binder out thread
 		// from fifo has low priority, so we modify priority higher.
 		// desired_prio.prio = NICE_TO_PRIO(0);
-		desired_prio.prio = NICE_TO_PRIO(-10);
-		desired_prio.sched_policy = SCHED_NORMAL;
+		desired.prio = NICE_TO_PRIO(-10);
+		desired.sched_policy = SCHED_NORMAL;
 	}
 
 	if (node_prio.prio < t->priority.prio ||
@@ -2620,8 +2620,7 @@ static int binder_proc_transaction(struct binder_transaction *t,
 		    }
 		}
 		#endif
-		binder_transaction_priority(thread, t, node_prio,
-					    node->inherit_rt);
+		binder_transaction_priority(thread, t, node);
 		binder_enqueue_thread_work_ilocked(thread, &t->work);
 	} else if (!pending_async) {
 		binder_enqueue_work_ilocked(&t->work, &proc->todo);
