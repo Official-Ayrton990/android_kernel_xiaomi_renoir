@@ -28,6 +28,7 @@
 #include <qdf_lro.h>
 #include <queue.h>
 #include <htt_common.h>
+#include <htt.h>
 #include <htt_stats.h>
 #include <cdp_txrx_cmn.h>
 #ifdef DP_MOB_DEFS
@@ -130,6 +131,12 @@
 
 #ifdef WLAN_SUPPORT_RX_FISA
 #define FISA_FLOW_MAX_AGGR_COUNT        16 /* max flow aggregate count */
+#endif
+
+#ifdef WLAN_FEATURE_RX_PREALLOC_BUFFER_POOL
+#define DP_RX_REFILL_BUFF_POOL_SIZE  2048
+#define DP_RX_REFILL_BUFF_POOL_BURST 64
+#define DP_RX_REFILL_THRD_THRESHOLD  512
 #endif
 
 enum rx_pktlog_mode {
@@ -526,6 +533,30 @@ struct dp_tx_desc_s {
 	struct hal_tx_desc_comp_s comp;
 };
 
+#ifdef QCA_AC_BASED_FLOW_CONTROL
+/**
+ * enum flow_pool_status - flow pool status
+ * @FLOW_POOL_ACTIVE_UNPAUSED : pool is active (can take/put descriptors)
+ *				and network queues are unpaused
+ * @FLOW_POOL_ACTIVE_PAUSED: pool is active (can take/put descriptors)
+ *			   and network queues are paused
+ * @FLOW_POOL_INVALID: pool is invalid (put descriptor)
+ * @FLOW_POOL_INACTIVE: pool is inactive (pool is free)
+ * @FLOW_POOL_ACTIVE_UNPAUSED_REATTACH: pool is reattached but network
+ *					queues are not paused
+ */
+enum flow_pool_status {
+	FLOW_POOL_ACTIVE_UNPAUSED = 0,
+	FLOW_POOL_ACTIVE_PAUSED = 1,
+	FLOW_POOL_BE_BK_PAUSED = 2,
+	FLOW_POOL_VI_PAUSED = 3,
+	FLOW_POOL_VO_PAUSED = 4,
+	FLOW_POOL_INVALID = 5,
+	FLOW_POOL_INACTIVE = 6,
+	FLOW_POOL_ACTIVE_UNPAUSED_REATTACH = 7,
+};
+
+#else
 /**
  * enum flow_pool_status - flow pool status
  * @FLOW_POOL_ACTIVE_UNPAUSED : pool is active (can take/put descriptors)
@@ -544,6 +575,8 @@ enum flow_pool_status {
 	FLOW_POOL_INVALID = 5,
 	FLOW_POOL_INACTIVE = 6,
 };
+
+#endif
 
 /**
  * struct dp_tx_tso_seg_pool_s
@@ -832,6 +865,22 @@ struct reo_desc_list_node {
 #endif
 };
 
+#ifdef WLAN_DP_FEATURE_DEFERRED_REO_QDESC_DESTROY
+#define REO_DESC_DEFERRED_FREELIST_SIZE 256
+#define REO_DESC_DEFERRED_FREE_MS 30000
+
+struct reo_desc_deferred_freelist_node {
+	qdf_list_node_t node;
+	unsigned long free_ts;
+	void *hw_qdesc_vaddr_unaligned;
+	qdf_dma_addr_t hw_qdesc_paddr;
+	uint32_t hw_qdesc_alloc_size;
+#ifdef REO_QDESC_HISTORY
+	uint8_t peer_mac[QDF_MAC_ADDR_SIZE];
+#endif /* REO_QDESC_HISTORY */
+};
+#endif /* WLAN_DP_FEATURE_DEFERRED_REO_QDESC_DESTROY */
+
 #ifdef WLAN_FEATURE_DP_EVENT_HISTORY
 /**
  * struct reo_cmd_event_record: Elements to record for each reo command
@@ -888,6 +937,8 @@ struct dp_soc_stats {
 		uint32_t tx_comp_loop_pkt_limit_hit;
 		/* Head pointer Out of sync at the end of dp_tx_comp_handler */
 		uint32_t hp_oos2;
+		/* tx desc freed as part of vdev detach */
+		uint32_t tx_comp_exception;
 	} tx;
 
 	/* SOC level RX stats */
@@ -921,6 +972,10 @@ struct dp_soc_stats {
 		uint32_t msdu_scatter_wait_break;
 		/* Number of bar frames received */
 		uint32_t bar_frame;
+		/* Number of frames routed from rxdma */
+		uint32_t rxdma2rel_route_drop;
+		/* Number of frames routed from reo*/
+		uint32_t reo2rel_route_drop;
 
 		struct {
 			/* Invalid RBM error count */
@@ -984,6 +1039,10 @@ struct dp_soc_stats {
 			uint32_t rx_2k_jump_to_stack;
 			/* RX 2k jump msdu dropped count */
 			uint32_t rx_2k_jump_drop;
+			/* REO ERR msdu buffer received */
+			uint32_t reo_err_msdu_buf_rcved;
+			/* REO ERR msdu buffer with invalid coookie received */
+			uint32_t reo_err_msdu_buf_invalid_cookie;
 			/* REO OOR msdu drop count */
 			uint32_t reo_err_oor_drop;
 			/* REO OOR msdu indicated to stack count */
@@ -1002,8 +1061,6 @@ struct dp_soc_stats {
 			uint32_t nbuf_sanity_fail;
 			/* Duplicate link desc refilled */
 			uint32_t dup_refill_link_desc;
-			/* REO OOR eapol drop count */
-			uint32_t reo_err_oor_eapol_drop;
 			/* count of start sequence (ssn) updates */
 			uint32_t ssn_update_count;
 			/* count of bar handling fail */
@@ -1012,6 +1069,8 @@ struct dp_soc_stats {
 			uint32_t intrabss_eapol_drop;
 			/* Non Eapol pkt drop cnt due to peer not authorized */
 			uint32_t peer_unauth_rx_pkt_drop;
+			/* MSDU len err count */
+			uint32_t msdu_len_err;
 		} err;
 
 		/* packet count per core - per ring */
@@ -1130,13 +1189,12 @@ struct rx_buff_pool {
 };
 
 struct rx_refill_buff_pool {
-	qdf_nbuf_t buf_head;
-	qdf_nbuf_t buf_tail;
-	qdf_spinlock_t bufq_lock;
-	uint32_t bufq_len;
-	uint32_t max_bufq_len;
-	bool in_rx_refill_lock;
 	bool is_initialized;
+	uint16_t head;
+	uint16_t tail;
+	struct dp_pdev *dp_pdev;
+	uint16_t max_bufq_len;
+	qdf_nbuf_t buf_elem[2048];
 };
 
 #ifdef DP_TX_HW_DESC_HISTORY
@@ -1378,6 +1436,8 @@ struct dp_swlm_stats {
  *			      ending the coalescing.
  * @tcl.coalesce_end_time: End timestamp for current coalescing session
  * @tcl.bytes_coalesced: Num bytes coalesced in the current session
+ * @tcl.tx_pkt_thresh: Threshold for TX packet count, to begin TCL register
+ *		       write coalescing
  */
 struct dp_swlm_params {
 	struct {
@@ -1391,6 +1451,7 @@ struct dp_swlm_params {
 		uint32_t tx_thresh_multiplier;
 		uint64_t coalesce_end_time;
 		uint32_t bytes_coalesced;
+		uint32_t tx_pkt_thresh;
 	} tcl;
 };
 
@@ -1647,6 +1708,12 @@ struct dp_soc {
 	/* SoC level data path statistics */
 	struct dp_soc_stats stats;
 
+	/* timestamp to keep track of msdu buffers received on reo err ring */
+	uint64_t rx_route_err_start_pkt_ts;
+
+	/* Num RX Route err in a given window to keep track of rate of errors */
+	uint32_t rx_route_err_in_window;
+
 	/* Enable processing of Tx completion status words */
 	bool process_tx_status;
 	bool process_rx_status;
@@ -1737,6 +1804,9 @@ struct dp_soc {
 
 	qdf_atomic_t ipa_pipes_enabled;
 	bool ipa_first_tx_db_access;
+	qdf_spinlock_t ipa_rx_buf_map_lock;
+	bool ipa_rx_buf_map_lock_initialized;
+	uint8_t ipa_reo_ctx_lock_required[MAX_REO_DEST_RINGS];
 #endif
 
 #ifdef WLAN_FEATURE_STATS_EXT
@@ -1846,6 +1916,12 @@ struct dp_soc {
 #ifdef FEATURE_RUNTIME_PM
 	/* Dp runtime refcount */
 	qdf_atomic_t dp_runtime_refcount;
+#endif
+
+#ifdef WLAN_DP_FEATURE_DEFERRED_REO_QDESC_DESTROY
+	qdf_list_t reo_desc_deferred_freelist;
+	qdf_spinlock_t reo_desc_deferred_freelist_lock;
+	bool reo_desc_deferred_freelist_init;
 #endif
 };
 
@@ -2506,9 +2582,6 @@ struct dp_vdev {
 
 	/* IGMP multicast enhancement enabled */
 	uint8_t igmp_mcast_enhanc_en;
-
-	/* HW TX Checksum Enabled Flag */
-	uint8_t csum_enabled;
 
 	/* vdev_id - ID used to specify a particular vdev to the target */
 	uint8_t vdev_id;
