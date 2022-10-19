@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2014-2021, The Linux Foundation. All rights reserved.
  */
 
 #define pr_fmt(fmt)	"[drm:%s:%d]: " fmt, __func__, __LINE__
@@ -299,8 +300,8 @@ static int _sde_power_data_bus_set_quota(
 	for (i = 0; i < paths; i++) {
 		if (pdbus->data_bus_hdl[i]) {
 			rc = icc_set_bw(pdbus->data_bus_hdl[i],
-					Bps_to_icc(in_ab_quota),
-					Bps_to_icc(in_ib_quota));
+				kBps_to_icc(div_u64(in_ab_quota, 1000)),
+				kBps_to_icc(div_u64(in_ib_quota, 1000)));
 			if (rc)
 				goto err;
 		}
@@ -316,8 +317,8 @@ err:
 	for (; i >= 0; --i)
 		if (pdbus->data_bus_hdl[i])
 			icc_set_bw(pdbus->data_bus_hdl[i],
-				   Bps_to_icc(pdbus->curr_val.ab),
-				   Bps_to_icc(pdbus->curr_val.ib));
+				kBps_to_icc(div_u64(pdbus->curr_val.ab, 1000)),
+				kBps_to_icc(div_u64(pdbus->curr_val.ib, 1000)));
 
 	SDE_ATRACE_END("msm_bus_scale_req");
 	pr_err("failed to set data bus vote ab=%llu ib=%llu rc=%d\n",
@@ -455,6 +456,40 @@ static int sde_power_mnoc_bus_parse(struct platform_device *pdev,
 	return rc;
 }
 
+static void sde_power_parse_ib_votes(struct platform_device *pdev,
+	struct sde_power_handle *phandle)
+{
+	int rc = 0;
+	u32 tmp = 0;
+
+	if (!pdev || !phandle) {
+		pr_err("invalid input param pdev:%pK phandle:%pK\n", pdev,
+						phandle);
+		return;
+	}
+
+	rc = of_property_read_u32(pdev->dev.of_node,
+			"qcom,sde-min-core-ib-kbps", &tmp);
+	if (rc)
+		pr_err("error reading min core ib vote. rc=%d, np=%x\n", rc, pdev->dev.of_node);
+
+	phandle->min_ib_vote.min_core_ib = (!rc ? tmp*1000 : 0);
+
+	rc = of_property_read_u32(pdev->dev.of_node,
+			"qcom,sde-min-llcc-ib-kbps", &tmp);
+	if (rc)
+		pr_err("error reading min llcc ib vote. rc=%d\n", rc);
+
+	phandle->min_ib_vote.min_llcc_ib = (!rc ? tmp*1000 : 0);
+
+	rc = of_property_read_u32(pdev->dev.of_node,
+			"qcom,sde-min-dram-ib-kbps", &tmp);
+	if (rc)
+		pr_err("error reading min dram ib vote. rc=%d\n", rc);
+
+	phandle->min_ib_vote.min_dram_ib = (!rc ? tmp*1000 : 0);
+}
+
 static int sde_power_bus_parse(struct platform_device *pdev,
 	struct sde_power_handle *phandle)
 {
@@ -530,8 +565,9 @@ static int sde_power_reg_bus_update(struct sde_power_reg_bus_handle *reg_bus,
 
 	if (reg_bus->reg_bus_hdl) {
 		SDE_ATRACE_BEGIN("msm_bus_scale_req");
-		rc = icc_set_bw(reg_bus->reg_bus_hdl, Bps_to_icc(ab_quota),
-				Bps_to_icc(ib_quota));
+		rc = icc_set_bw(reg_bus->reg_bus_hdl,
+				kBps_to_icc(div_u64(ab_quota, 1000)),
+				kBps_to_icc(div_u64(ib_quota, 1000)));
 		SDE_ATRACE_END("msm_bus_scale_req");
 	}
 
@@ -597,6 +633,8 @@ int sde_power_resource_init(struct platform_device *pdev,
 		pr_err("bus parse failed rc=%d\n", rc);
 		goto bus_err;
 	}
+
+	sde_power_parse_ib_votes(pdev, phandle);
 
 	INIT_LIST_HEAD(&phandle->event_list);
 
@@ -694,6 +732,7 @@ int sde_power_resource_enable(struct sde_power_handle *phandle, bool enable)
 {
 	int rc = 0, i = 0;
 	struct dss_module_power *mp;
+	u32 bus_ib_quota = 0;
 
 	if (!phandle) {
 		pr_err("invalid input argument\n");
@@ -717,10 +756,26 @@ int sde_power_resource_enable(struct sde_power_handle *phandle, bool enable)
 
 		for (i = 0; i < SDE_POWER_HANDLE_DBUS_ID_MAX &&
 			phandle->data_bus_handle[i].data_paths_cnt > 0; i++) {
+
+			bus_ib_quota = 0;
+			switch (i) {
+			case SDE_POWER_HANDLE_DBUS_ID_MNOC:
+				bus_ib_quota =
+					phandle->min_ib_vote.min_core_ib;
+				break;
+			case SDE_POWER_HANDLE_DBUS_ID_LLCC:
+				bus_ib_quota =
+					phandle->min_ib_vote.min_llcc_ib;
+				break;
+			case SDE_POWER_HANDLE_DBUS_ID_EBI:
+				bus_ib_quota =
+					phandle->min_ib_vote.min_dram_ib;
+			}
+
 			rc = _sde_power_data_bus_set_quota(
 				&phandle->data_bus_handle[i],
 				SDE_POWER_HANDLE_ENABLE_BUS_AB_QUOTA,
-				SDE_POWER_HANDLE_ENABLE_BUS_IB_QUOTA);
+				bus_ib_quota);
 			if (rc) {
 				pr_err("failed to set data bus vote id=%d rc=%d\n",
 						i, rc);
