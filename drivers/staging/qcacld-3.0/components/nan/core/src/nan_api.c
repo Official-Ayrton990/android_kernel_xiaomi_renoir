@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -30,6 +31,7 @@
 #include "wlan_objmgr_pdev_obj.h"
 #include "wlan_objmgr_vdev_obj.h"
 #include "nan_ucfg_api.h"
+#include <wlan_mlme_api.h>
 
 static QDF_STATUS nan_psoc_obj_created_notification(
 		struct wlan_objmgr_psoc *psoc, void *arg_list)
@@ -407,4 +409,51 @@ QDF_STATUS nan_psoc_disable(struct wlan_objmgr_psoc *psoc)
 		nan_err("target_if_nan_deregister_events failed");
 
 	return QDF_STATUS_SUCCESS;
+}
+
+static bool
+wlan_is_nan_allowed_on_6ghz_freq(struct wlan_objmgr_pdev *pdev, uint32_t freq)
+{
+	QDF_STATUS status;
+	struct regulatory_channel chan_list[NUM_6GHZ_CHANNELS];
+	uint16_t i;
+
+	status = wlan_reg_get_6g_ap_master_chan_list(pdev,
+						     REG_VERY_LOW_POWER_AP,
+						     chan_list);
+
+	for (i = 0; i < NUM_6GHZ_CHANNELS; i++) {
+		if ((freq == chan_list[i].center_freq) &&
+		    (chan_list[i].state == CHANNEL_STATE_ENABLE))
+			return true;
+	}
+
+	return false;
+}
+
+bool wlan_is_nan_allowed_on_freq(struct wlan_objmgr_pdev *pdev, uint32_t freq)
+{
+	bool nan_allowed = true;
+
+	/* Check for 6GHz channels */
+	if (wlan_reg_is_6ghz_chan_freq(freq)) {
+		nan_allowed = wlan_is_nan_allowed_on_6ghz_freq(pdev, freq);
+		return nan_allowed;
+	}
+
+	/* Check for SRD channels */
+	if (wlan_reg_is_etsi13_srd_chan_for_freq(pdev, freq))
+		wlan_mlme_get_srd_master_mode_for_vdev(wlan_pdev_get_psoc(pdev),
+						       QDF_NAN_DISC_MODE,
+						       &nan_allowed);
+
+	/* Check for Indoor channels */
+	if (wlan_reg_is_freq_indoor(pdev, freq))
+		wlan_mlme_get_indoor_support_for_nan(wlan_pdev_get_psoc(pdev),
+						     &nan_allowed);
+	/* Check for dfs only if channel is not indoor */
+	else if (wlan_reg_is_dfs_for_freq(pdev, freq))
+		nan_allowed = false;
+
+	return nan_allowed;
 }
